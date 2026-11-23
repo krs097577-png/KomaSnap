@@ -3,9 +3,9 @@ param([switch]$Verify, [string]$VerifyName = 'ReaderVerification.exe', [string]$
 $ErrorActionPreference = 'Stop'
 $framework = Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319'
 $winmd = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits/8.1/References/CommonConfiguration/Neutral/Annotated/Windows.winmd'
-$sources = 'Reader.cs','ReaderAppearance.cs','ReaderSpine.cs','ReaderState.cs','ReaderBook.cs','PdfBook.cs','ArchiveBook.cs','PageTurnEffect.cs','PageSlideEffect.cs','ContinuousReader.cs','Bookshelf.cs' | ForEach-Object { Join-Path $PSScriptRoot $_ }
+$sources = 'Reader.cs','ReaderTray.cs','ReaderAppearance.cs','ReaderSpine.cs','ReaderState.cs','ReaderBook.cs','PdfBook.cs','ArchiveBook.cs','PageTurnEffect.cs','PageSlideEffect.cs','ContinuousReader.cs','Bookshelf.cs' | ForEach-Object { Join-Path $PSScriptRoot $_ }
 $references = 'System.Runtime.dll','System.Runtime.WindowsRuntime.dll','System.Xml.Linq.dll',
-    'System.IO.Compression.dll',
+    'System.IO.Compression.dll','System.Drawing.dll','System.Windows.Forms.dll',
     'WPF/PresentationFramework.dll','WPF/PresentationCore.dll','WPF/WindowsBase.dll','System.Xaml.dll' |
     ForEach-Object { "/reference:$(Join-Path $framework $_)" }
 $references += "/reference:$winmd"

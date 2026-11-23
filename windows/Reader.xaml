@@ -204,7 +204,7 @@
               BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1">
         <StackPanel Margin="16,7,16,4">
           <DockPanel LastChildFill="True" Margin="0,0,0,4">
-            <Button x:Name="ShowShelf" Style="{StaticResource IconButton}" Content="书架" ToolTip="打开书架（B）"
+            <Button x:Name="ShowShelf" Style="{StaticResource IconButton}" Content="书架" ToolTip="返回书架（Esc / B）"
                     Tag="M1,2 Q5,1 8,4 Q11,1 15,2 L15,13 Q11,12 8,15 Q5,12 1,13 Z M8,4 L8,15"/>
             <TextBlock x:Name="BookTitle" Margin="7,0,10,0" FontWeight="SemiBold" FontSize="14"
                        TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Text="KomaSnap"/>
@@ -225,7 +225,7 @@
             <Button x:Name="PageMotion" Style="{StaticResource IconButton}" Content="翻页方式" ToolTip="选择翻页方式（S）" Tag="M2,1 H14 V13 H2 Z M5,5 H11 M5,8 H11 M6,13 L8,15 L10,13"/>
             <Button x:Name="ReaderThemeButton" Style="{StaticResource IconButton}" Content="主题" ToolTip="切换阅读主题（T）"
                     Tag="M8,1 A7,7 0 1 0 8,15 A7,7 0 1 0 8,1 M8,1 V15"/>
-            <Button x:Name="Full" Style="{StaticResource IconButton}" Content="全屏" ToolTip="全屏（F11），Esc 退出" Tag="M1,6 V1 H6 M10,1 H15 V6 M15,10 V15 H10 M6,15 H1 V10"/>
+            <Button x:Name="Full" Style="{StaticResource IconButton}" Content="全屏" ToolTip="进入或退出全屏（F11）" Tag="M1,6 V1 H6 M10,1 H15 V6 M15,10 V15 H10 M6,15 H1 V10"/>
           </WrapPanel>
         </StackPanel>
       </Border>
@@ -260,7 +260,7 @@
       <Border Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1">
         <DockPanel Margin="27,14" LastChildFill="True">
           <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" VerticalAlignment="Center">
-            <Button x:Name="BackToBook" Content="返回阅读" Visibility="Collapsed" ToolTip="返回阅读（B 或 Esc）"/>
+            <Button x:Name="BackToBook" Content="返回阅读" Visibility="Collapsed" ToolTip="返回阅读（B）"/>
             <Button x:Name="Open" Content="打开文件" ToolTip="打开文件（Ctrl+O）"/>
             <Button x:Name="AddBooks" Content="+ 添加书籍" ToolTip="批量添加书籍"/>
             <Button x:Name="ThemeButton" Content="主题" Margin="0" ToolTip="切换界面主题"/>

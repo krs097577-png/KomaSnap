@@ -110,6 +110,12 @@ sealed class Bookshelf
 
     public bool HasCover(string path) { return File.Exists(CoverPath(path)); }
 
+    public void DeleteCover(string path)
+    {
+        try { File.Delete(CoverPath(path)); }
+        catch (DirectoryNotFoundException) { }
+    }
+
     public void SaveCover(string path, BitmapSource bitmap)
     {
         ReaderState.WriteAtomic(CoverPath(path), temp =>

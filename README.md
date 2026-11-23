@@ -2,6 +2,13 @@
 
 KomaSnap 是一款轻量级漫画与电子书阅读器。支持导入 PDF、无 DRM 的 EPUB、CBZ 和图片 ZIP。
 
+## 下载
+
+- [Windows 1.8（EXE）](https://github.com/krs097577-png/KomaSnap/releases/download/windows-v1.8/KomaSnap-Windows.exe)。下载后直接运行。阅读时按 Esc 返回书架，点窗口关闭按钮收进系统托盘。
+- [Android 1.8.2（APK）](https://github.com/krs097577-png/KomaSnap/releases/download/v1.8.2/KomaSnap-Android-1.8.2.apk)。
+
+## 源码与构建
+
 | 平台 | 技术栈 | 运行或构建 |
 | --- | --- | --- |
 | [Windows](windows/) | WPF / .NET Framework | 在 Windows 下运行 PowerShell 脚本 `windows/Build.ps1`，需要 Windows 8.1 SDK 的 WinRT 元数据。生成文件位于 `outputs/`。 |

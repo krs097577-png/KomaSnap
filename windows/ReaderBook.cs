@@ -96,6 +96,17 @@ abstract class ReaderBook
         return cache.TryGetValue(Tuple.Create(page, RenderWidth(page, screenWidth)), out bitmap);
     }
 
+    public void ClearCache()
+    {
+        cache.Clear();
+        recency.Clear();
+        cachedBytes = 0;
+        // 取消后续写入。取消回调可能同步结束解码并修改 pending。
+        var jobs = new List<PendingPage>(pending.Values);
+        pending.Clear();
+        foreach (var job in jobs) job.Lifetime.Cancel();
+    }
+
     public async Task<BitmapSource> RenderAsync(int index, double screenWidth, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();

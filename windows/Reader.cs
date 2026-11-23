@@ -54,9 +54,11 @@ sealed class Reader
     ScrollViewer ActiveViewport { get { return IsScrolling ? continuous.Viewport : viewport; } }
     List<int[]> spreads;
     CancellationTokenSource opening;
+    string openingPath;
     CancellationTokenSource rendering;
     CancellationTokenSource preloading;
     CancellationTokenSource coverWork;
+    string coverWorkPath;
     bool resetScrollOnShow;
     int position;
     int spreadIndex;
@@ -81,11 +83,35 @@ sealed class Reader
     [STAThread]
     public static void Main(string[] args)
     {
-        var app = new Application();
-        var reader = new Reader();
-        if (args.Length > 0)
-            reader.window.Loaded += async (s, e) => await reader.OpenAsync(args[0]);
-        ExitAfterWindowCloses(app.Run(reader.window));
+        int exitCode;
+        // 先创建唤醒事件，快速重复启动时也能保留唤醒请求。
+        using (var wake = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\KomaSnap.Reader.Restore"))
+        {
+            bool first;
+            using (var instance = new Mutex(false, @"Local\KomaSnap.Reader.Instance", out first))
+            {
+                if (!first && args.Length == 0)
+                {
+                    wake.Set();
+                    return;
+                }
+                var app = new Application();
+                var reader = new Reader();
+                if (args.Length > 0)
+                {
+                    RoutedEventHandler openOnLoad = null;
+                    openOnLoad = async (s, e) =>
+                    {
+                        reader.window.Loaded -= openOnLoad;
+                        await reader.OpenAsync(args[0]);
+                    };
+                    reader.window.Loaded += openOnLoad;
+                }
+                using (var tray = new ReaderTray(reader.window, reader.FlushPosition, first ? wake : null))
+                    exitCode = app.Run(reader.window);
+            }
+        }
+        ExitAfterWindowCloses(exitCode);
     }
 
     [DllImport("kernel32.dll")]
@@ -140,7 +166,7 @@ sealed class Reader
         progress = Find<Slider>("Progress");
 
         Bind("Open", ChooseFile);
-        Bind("ShowShelf", () => SetShelfVisible(true));
+        Find<Button>("ShowShelf").Click += (s, e) => ShowShelf();
         Bind("BackToBook", ReturnToBook);
         Bind("AddBooks", ChooseShelfBooks);
         Bind("EmptyAddBooks", ChooseShelfBooks);
@@ -297,7 +323,8 @@ sealed class Reader
         SetNotice("正在打开文件…", false);
         try
         {
-            var loaded = await ReaderBook.OpenAsync(Path.GetFullPath(path), operation.Token);
+            openingPath = Path.GetFullPath(path);
+            var loaded = await ReaderBook.OpenAsync(openingPath, operation.Token);
             operation.Token.ThrowIfCancellationRequested();
             FlushPosition();
             if (rendering != null) rendering.Cancel();
@@ -338,7 +365,11 @@ sealed class Reader
         }
         finally
         {
-            if (opening == operation) opening = null;
+            if (opening == operation)
+            {
+                opening = null;
+                openingPath = null;
+            }
             operation.Dispose();
         }
     }
@@ -370,6 +401,12 @@ sealed class Reader
             Find<Button>("BackToBook").Visibility = book == null ? Visibility.Collapsed : Visibility.Visible;
             ReloadShelf();
         }
+    }
+
+    void ShowShelf()
+    {
+        SetShelfVisible(true);
+        FocusReader();
     }
 
     void ReturnToBook()
@@ -476,16 +513,45 @@ sealed class Reader
 
     void RemoveShelfBook(string path)
     {
-        try
-        {
-            bookshelf.Remove(path);
-            ReloadShelf();
-            SetNotice("已移出书架。");
-        }
+        try { bookshelf.Remove(path); }
         catch (Exception error)
         {
             if (!ReaderState.IsStorageError(error)) throw;
             SetNotice("无法移出书架。\n" + error.Message);
+            return;
+        }
+
+        var comparison = StringComparison.OrdinalIgnoreCase;
+        if (opening != null && string.Equals(openingPath, path, comparison)) opening.Cancel();
+        if (coverWork != null && string.Equals(coverWorkPath, path, comparison)) coverWork.Cancel();
+        if (book != null && string.Equals(book.Path, path, comparison))
+        {
+            FlushPosition();
+            pageTurn.Stop();
+            CancelSlide();
+            jumpTimer.Stop();
+            if (rendering != null) rendering.Cancel();
+            if (preloading != null) preloading.Cancel();
+            continuous.Stop();
+            book.ClearCache();
+            book = null;
+            bookDirection = null;
+            spreads = null;
+            spread.Children.Clear();
+            window.Title = "KomaSnap";
+            Find<Button>("BackToBook").Visibility = Visibility.Collapsed;
+            SyncControls();
+        }
+        ReloadShelf();
+        try
+        {
+            bookshelf.DeleteCover(path);
+            SetNotice("已移出书架并清理缓存。");
+        }
+        catch (Exception error)
+        {
+            if (!ReaderState.IsStorageError(error)) throw;
+            SetNotice("已移出书架，封面缓存清理失败。\n" + error.Message, false);
         }
     }
 
@@ -495,6 +561,7 @@ sealed class Reader
         if (bookshelf.HasCover(opened.Path)) return;
         var operation = new CancellationTokenSource();
         coverWork = operation;
+        coverWorkPath = opened.Path;
         var token = operation.Token;
         try
         {
@@ -508,7 +575,11 @@ sealed class Reader
         catch (Exception error) { System.Diagnostics.Debug.WriteLine(error); }
         finally
         {
-            if (coverWork == operation) coverWork = null;
+            if (coverWork == operation)
+            {
+                coverWork = null;
+                coverWorkPath = null;
+            }
             operation.Dispose();
         }
     }
@@ -678,7 +749,7 @@ sealed class Reader
             window.WindowState = oldWindowState;
         }
         chrome.Hide();
-        if (fullscreen) SetNotice("按 Esc 或 F11 退出全屏");
+        if (fullscreen) SetNotice("Esc 返回书架，F11 退出全屏");
         else SetNotice(null);
     }
 
@@ -887,7 +958,7 @@ sealed class Reader
         }
         if (IsShelfVisible)
         {
-            if (book != null && (e.Key == Key.B || e.Key == Key.Escape))
+            if (book != null && e.Key == Key.B)
             {
                 ReturnToBook();
                 e.Handled = true;
@@ -898,7 +969,9 @@ sealed class Reader
         switch (e.Key)
         {
             case Key.F11: ToggleFullscreen(); break;
-            case Key.Escape: if (fullscreen) ToggleFullscreen(); else return; break;
+            case Key.Escape:
+                if (e.IsRepeat) return;
+                goto case Key.B;
             case Key.Left: Turn(RightToLeft ? 1 : -1); break;
             case Key.Right: Turn(RightToLeft ? -1 : 1); break;
             case Key.PageDown: case Key.Space:
@@ -919,7 +992,7 @@ sealed class Reader
             case Key.R: ToggleDirection(); break;
             case Key.C: if (!IsScrolling && state.Dual) ToggleCover(); break;
             case Key.W: ToggleFit(); break;
-            case Key.B: SetShelfVisible(true); FocusReader(); break;
+            case Key.B: ShowShelf(); break;
             case Key.S: OpenMotionMenu(); break;
             case Key.T:
                 if (Keyboard.Modifiers != ModifierKeys.None) return;

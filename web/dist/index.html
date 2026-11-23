@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="description" content="KomaSnap 漫画阅读器。在浏览器本地阅读 PDF、EPUB、CBZ 和图片 ZIP。">
+<meta name="theme-color" content="#191b1e">
+<title>KomaSnap · 漫画阅读器</title>
+<link rel="icon" href="./icon.png">
+<link rel="stylesheet" href="./style.css">
+<body>
+<div id="shelf" class="shell">
+  <header class="topbar">
+    <div class="brand"><img src="./icon.png" alt=""><span>KomaSnap</span></div>
+    <button class="primary" id="add" type="button"><span aria-hidden="true">＋</span> 添加书籍</button>
+  </header>
+  <main class="library">
+    <div class="heading">
+      <div><h1>书架</h1><p id="count" class="muted">0 本书</p></div>
+      <div class="tools" id="shelf-tools" hidden>
+        <input id="search" type="search" placeholder="搜索书名" aria-label="搜索书名">
+        <select id="sort" aria-label="排序"><option value="recent">最近阅读</option><option value="added">最近添加</option><option value="name">书名排序</option></select>
+      </div>
+    </div>
+    <div id="books" class="books"></div>
+    <section id="empty" class="empty">
+      <div class="empty-mark"><img src="./icon.png" alt=""></div>
+      <h2>把书放到书架上</h2>
+      <p>将书籍拖到这里，或从设备中选择文件。</p>
+      <button class="primary" id="empty-add" type="button">选择文件</button>
+      <p class="formats">PDF · EPUB · CBZ · 图片 ZIP</p>
+    </section>
+    <p id="no-match" class="muted" hidden>没有找到匹配的书籍。</p>
+    <footer class="library-footer">书籍和阅读进度保存在当前浏览器。</footer>
+  </main>
+</div>
+<section id="reader" class="reader" hidden aria-label="阅读器">
+  <header class="reader-top">
+    <div class="reader-brand"><button id="back" type="button">书架</button><h1 id="title"></h1></div>
+    <div class="reader-tools">
+      <button id="layout" type="button" title="切换单页或双页">双页</button>
+      <button id="direction" type="button" title="切换阅读方向">右到左</button>
+      <button id="fit" type="button">适整页</button>
+      <button id="smaller" type="button" aria-label="缩小">−</button>
+      <button id="larger" type="button" aria-label="放大">+</button>
+      <select id="mode" aria-label="翻页方式"><option value="slide">左右滑动</option><option value="curl">仿真卷页</option><option value="scroll">上下滚动</option></select>
+      <button id="show-progress" type="button">进度</button>
+      <button id="full" type="button">全屏</button>
+    </div>
+  </header>
+  <div id="stage" class="stage" tabindex="0" aria-label="阅读区，点击中间显示进度栏">
+    <div id="deck" class="deck"></div>
+    <div id="stream" class="stream" hidden></div>
+    <div id="waiting" class="waiting" role="status" hidden></div>
+  </div>
+  <div id="progress" class="progress" hidden>
+    <button id="previous" type="button">上一页</button><button id="next" type="button">下一页</button>
+    <label class="page-entry"><input id="page" type="number" min="1" aria-label="页码"><span id="total"></span></label>
+    <input id="slider" type="range" min="1" aria-label="阅读进度">
+  </div>
+</section>
+<input id="files" type="file" multiple accept=".pdf,.epub,.cbz,.zip,application/pdf,application/epub+zip,application/zip" hidden>
+<div id="notice" class="notice" role="status" hidden></div>
+<dialog id="remove"><form method="dialog"><h2>移出书架</h2><p id="remove-label"></p><div class="dialog-actions"><button value="cancel">取消</button><button class="primary" value="remove">移出</button></div></form></dialog>
+<script src="./vendor/jszip.min.js" defer></script>
+<script type="module" src="./app.js"></script>
+</body>
+</html>

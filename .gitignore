@@ -1,0 +1,11 @@
+/outputs/
+/android/build/
+/android/sdk-local/
+/android/verify/classes/
+/windows/*.exe
+*.apk
+*.jks
+*.keystore
+*.p12
+*.pfx
+.env

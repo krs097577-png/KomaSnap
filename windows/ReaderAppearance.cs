@@ -1,11 +1,14 @@
 using System;
 using System.Collections;
+using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Markup;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
@@ -18,26 +21,45 @@ sealed class ReaderAppearance
 {
     const string PreferencePath = @"Software\KomaSnap\Appearance";
     const string PreferenceName = "Theme";
-    static readonly string[] Names = { "Light", "EyeCare", "Dark" };
-    static readonly string[] Labels = { "白色", "护眼", "夜间" };
+    const string DefaultTheme = "Paper";
+    const int TransitionMs = 200;
+    static readonly string[] Names = { "Light", "Paper", "EyeCare", "Mint", "Dark", "Black" };
+    static readonly string[] Labels = { "纯白原色", "实体单行本", "牛皮暖纸", "薄荷护眼", "柔光暗夜", "极夜纯黑" };
     readonly bool useRegistry;
+    readonly Window window;
     readonly ResourceDictionary palettes;
     readonly ResourceDictionary brushes = new ResourceDictionary();
     readonly SolidColorBrush canvasPaint = new SolidColorBrush();
     readonly ContextMenu menu;
     readonly Button shelfTheme, readerTheme;
+    readonly Stopwatch captionClock = new Stopwatch();
+    IntPtr captionHandle;
+    uint? lastCaption, lastCaptionText;
     public string Current { get; private set; }
+    public Effect PageEffect { get; private set; }
+    public event Action<Effect> PageEffectChanged;
     public ContextMenu ThemeMenu { get { return menu; } }
 
     public ReaderAppearance(Window window, bool useRegistry)
     {
         this.useRegistry = useRegistry;
+        this.window = window;
         using (var file = Assembly.GetExecutingAssembly().GetManifestResourceStream("ThemeTokens.xaml"))
             palettes = (ResourceDictionary)XamlReader.Load(file);
         window.Resources.MergedDictionaries.Add(brushes);
         // 独立的弹出窗口使用同一组可变主题资源。
         Application.Current.Resources.MergedDictionaries.Add(brushes);
-        window.Closed += (s, e) => Application.Current.Resources.MergedDictionaries.Remove(brushes);
+        window.SourceInitialized += (s, e) =>
+        {
+            if (SystemParameters.HighContrast) return;
+            captionHandle = new WindowInteropHelper(window).Handle;
+            if (!UpdateCaption()) captionHandle = IntPtr.Zero;
+        };
+        window.Closed += (s, e) =>
+        {
+            StopCaptionTransition();
+            Application.Current.Resources.MergedDictionaries.Remove(brushes);
+        };
         menu = NewMenu(window);
         EnableOptionKeys(menu);
         shelfTheme = (Button)window.FindName("ThemeButton");
@@ -66,7 +88,7 @@ sealed class ReaderAppearance
                 menu.IsOpen = true;
             };
         }
-        Apply(useRegistry ? ReadPreference() : "Dark", false);
+        Apply(useRegistry ? ReadPreference() : DefaultTheme, false);
         ((Grid)window.FindName("Stage")).Background = canvasPaint;
     }
 
@@ -83,27 +105,33 @@ sealed class ReaderAppearance
 
     public void Apply(string name, bool transition)
     {
-        if (Array.IndexOf(Names, name) < 0) name = "Dark";
+        if (Array.IndexOf(Names, name) < 0) name = DefaultTheme;
         Current = name;
         var palette = (ResourceDictionary)palettes[name];
+        bool animated = transition && SystemParameters.ClientAreaAnimation;
         foreach (DictionaryEntry item in palette)
         {
-            if (item.Key.Equals("Shadow") || item.Key.Equals("PreviewFill") || item.Key.Equals("PreviewStroke")) continue;
+            string key = (string)item.Key;
+            if (key == "Shadow" || key.StartsWith("Preview", StringComparison.Ordinal)
+                || key == "PageMultiply" || key == "PageBrightness") continue;
             var color = (Color)item.Value;
-            var before = brushes[item.Key] as SolidColorBrush;
+            var before = brushes[key] as SolidColorBrush;
             var paint = new SolidColorBrush(color);
-            if (before != null && transition && !item.Key.Equals("Paper") && !item.Key.Equals("ReaderTintBrush"))
+            if (animated && key != "Paper" && before != null && before.Color != color)
                 Fade(paint, before.Color, color);
-            brushes[item.Key] = paint;
-            if (item.Key.Equals("Canvas"))
+            brushes[key] = paint;
+            if (key == "Canvas")
             {
-                // 阅读画布与现有动画共用这个画刷，不更换任何动画逻辑。
+                // 翻页遮罩持有这支画刷，与阅读画布同步更新。
                 Color old = canvasPaint.Color;
                 canvasPaint.BeginAnimation(SolidColorBrush.ColorProperty, null);
                 canvasPaint.Color = color;
-                if (transition) Fade(canvasPaint, old, color);
+                if (animated && old != color) Fade(canvasPaint, old, color);
             }
         }
+        PageEffect = ReaderColorEffect.FromPalette((Color)palette["PageMultiply"], (double)palette["PageBrightness"]);
+        brushes["PageColorEffect"] = PageEffect;
+        if (PageEffectChanged != null) PageEffectChanged(PageEffect);
         var shadow = (Color)palette["Shadow"];
         brushes["PopupShadow"] = new DropShadowEffect { BlurRadius = 13, ShadowDepth = 2, Direction = 270,
             Color = Color.FromRgb(shadow.R, shadow.G, shadow.B), Opacity = shadow.A / 255.0 };
@@ -111,25 +139,75 @@ sealed class ReaderAppearance
         string label = "当前主题 · " + Labels[Array.IndexOf(Names, name)];
         shelfTheme.ToolTip = label;
         readerTheme.ToolTip = label + "（T）";
+        StopCaptionTransition();
+        if (captionHandle != IntPtr.Zero)
+        {
+            UpdateCaption();
+            if (animated && window.IsVisible)
+            {
+                captionClock.Start();
+                CompositionTarget.Rendering += UpdateCaptionFrame;
+            }
+        }
     }
 
     static void Fade(SolidColorBrush brush, Color from, Color to)
     {
-        if (SystemParameters.ClientAreaAnimation && from != to)
-            brush.BeginAnimation(SolidColorBrush.ColorProperty,
-                new ColorAnimation(from, to, TimeSpan.FromMilliseconds(200)) { FillBehavior = FillBehavior.Stop });
+        brush.BeginAnimation(SolidColorBrush.ColorProperty,
+            new ColorAnimation(from, to, TimeSpan.FromMilliseconds(TransitionMs))
+            {
+                FillBehavior = FillBehavior.Stop
+            });
     }
+
+    void UpdateCaptionFrame(object sender, EventArgs e)
+    {
+        UpdateCaption();
+        if (captionClock.ElapsedMilliseconds > TransitionMs + 50) StopCaptionTransition();
+    }
+
+    void StopCaptionTransition()
+    {
+        CompositionTarget.Rendering -= UpdateCaptionFrame;
+        captionClock.Reset();
+    }
+
+    bool UpdateCaption()
+    {
+        // Windows 11 支持系统标题栏颜色。旧系统保留系统标题栏样式。
+        uint caption = ColorRef(((SolidColorBrush)brushes["Surface"]).Color);
+        uint text = ColorRef(((SolidColorBrush)brushes["TextPrimary"]).Color);
+        if (lastCaption != caption)
+        {
+            if (DwmSetWindowAttribute(captionHandle, 35, ref caption, sizeof(uint)) != 0) return false;
+            lastCaption = caption;
+        }
+        if (lastCaptionText != text)
+        {
+            DwmSetWindowAttribute(captionHandle, 36, ref text, sizeof(uint));
+            lastCaptionText = text;
+        }
+        return true;
+    }
+
+    static uint ColorRef(Color color)
+    {
+        return (uint)(color.R | color.G << 8 | color.B << 16);
+    }
+
+    [DllImport("dwmapi.dll", ExactSpelling = true)]
+    static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref uint value, int size);
 
     static string ReadPreference()
     {
         try
         {
             using (var key = Registry.CurrentUser.OpenSubKey(PreferencePath))
-                return key == null ? "Dark" : key.GetValue(PreferenceName, "Dark") as string;
+                return key == null ? DefaultTheme : key.GetValue(PreferenceName, DefaultTheme) as string;
         }
-        catch (UnauthorizedAccessException) { return "Dark"; }
-        catch (System.Security.SecurityException) { return "Dark"; }
-        catch (System.IO.IOException) { return "Dark"; }
+        catch (UnauthorizedAccessException) { return DefaultTheme; }
+        catch (System.Security.SecurityException) { return DefaultTheme; }
+        catch (System.IO.IOException) { return DefaultTheme; }
     }
 
     static void WritePreference(string theme)
@@ -197,6 +275,7 @@ sealed class ReaderAppearance
     public static void StylePage(Border frame)
     {
         frame.SetResourceReference(Border.BackgroundProperty, "Paper");
+        frame.SetResourceReference(UIElement.EffectProperty, "PageColorEffect");
     }
 }
 
@@ -330,3 +409,4 @@ sealed class ReadingChrome
         }
     }
 }
+

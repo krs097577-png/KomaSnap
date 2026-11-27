@@ -15,6 +15,7 @@ sealed class ReaderState
     public bool SoloCover = true;
     public bool FitWidth;
     public bool ContinuousFitWidth = true;
+    public bool OnlineTrim;
     public PageMotion Motion = PageMotion.Slide;
     public string LastPath;
 
@@ -30,6 +31,7 @@ sealed class ReaderState
             SoloCover = (bool?)saved.Element("cover") ?? SoloCover;
             FitWidth = (bool?)saved.Element("fitWidth") ?? FitWidth;
             ContinuousFitWidth = (bool?)saved.Element("continuousFitWidth") ?? ContinuousFitWidth;
+            OnlineTrim = (bool?)saved.Element("onlineTrim") ?? OnlineTrim;
             PageMotion motion;
             if (Enum.TryParse((string)saved.Element("pageMotion"), out motion) && Enum.IsDefined(typeof(PageMotion), motion))
                 Motion = motion;
@@ -58,7 +60,7 @@ sealed class ReaderState
     {
         var xml = new XElement("reader", new XElement("dual", Dual), new XElement("rtl", RightToLeft),
             new XElement("cover", SoloCover), new XElement("fitWidth", FitWidth),
-            new XElement("continuousFitWidth", ContinuousFitWidth),
+            new XElement("continuousFitWidth", ContinuousFitWidth), new XElement("onlineTrim", OnlineTrim),
             new XElement("pageMotion", Motion),
             new XElement("lastPath", LastPath ?? ""));
         Write(System.IO.Path.Combine(folder, "settings.xml"), xml.ToString());
@@ -104,3 +106,4 @@ sealed class ReaderState
             error is System.Security.SecurityException;
     }
 }
+

@@ -20,14 +20,15 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("KomaSnap")]
 [assembly: AssemblyProduct("KomaSnap")]
 [assembly: AssemblyDescription("轻量级漫画与电子书阅读器")]
-[assembly: AssemblyVersion("1.8.0.0")]
-[assembly: AssemblyFileVersion("1.8.0.0")]
-[assembly: AssemblyInformationalVersion("1.8")]
+[assembly: AssemblyVersion("1.14.0.0")]
+[assembly: AssemblyFileVersion("1.14.0.0")]
+[assembly: AssemblyInformationalVersion("1.14")]
 
 sealed class Reader
 {
     readonly Window window;
     readonly ReaderState state;
+    readonly OnlineWorkspace onlineWorkspace;
     readonly Bookshelf bookshelf;
     readonly Grid readerView;
     readonly Grid shelfView;
@@ -47,6 +48,8 @@ sealed class Reader
     readonly DispatcherTimer noticeTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(4) };
     readonly DispatcherTimer positionTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(220) };
     ReaderBook book;
+    Bookshelf.Entry nextVolume;
+    bool lastSpreadPresented;
     bool? bookDirection;
     bool RightToLeft { get { return bookDirection ?? state.RightToLeft; } }
     bool IsScrolling { get { return state.Motion == PageMotion.Scroll; } }
@@ -139,6 +142,8 @@ sealed class Reader
         viewport = Find<ScrollViewer>("Viewport");
         continuous = new ContinuousReader(Find<ScrollViewer>("ContinuousViewport"), Find<Canvas>("ContinuousPages"));
         continuous.PositionChanged += TrackScrollPosition;
+        continuous.EndVisibilityChanged += SyncNextVolume;
+        viewport.ScrollChanged += (s, e) => SyncNextVolume();
         spread = Find<StackPanel>("Spread");
         stage = Find<Grid>("Stage");
         new ReaderSpine(spread);
@@ -146,6 +151,8 @@ sealed class Reader
         stage.Children.Insert(1, pageTurn);
         slide = new PageSlideEffect(stage.Background);
         stage.Children.Insert(2, slide);
+        pageTurn.PaperEffect = slide.PaperEffect = appearance.PageEffect;
+        appearance.PageEffectChanged += effect => pageTurn.PaperEffect = slide.PaperEffect = effect;
         motionMenu = ReaderAppearance.NewMenu(window);
         ReaderAppearance.EnableOptionKeys(motionMenu);
         var motionIcons = new[] { "M1,4 H15 V12 H1 Z M5,8 H11 M8,5 L11,8 L8,11",
@@ -170,6 +177,14 @@ sealed class Reader
         Bind("BackToBook", ReturnToBook);
         Bind("AddBooks", ChooseShelfBooks);
         Bind("EmptyAddBooks", ChooseShelfBooks);
+        Bind("OnlineManga", OpenOnlineManga);
+        Bind("Suwayomi", OpenSuwayomi);
+        onlineWorkspace = new OnlineWorkspace(window, state, paths => AddToShelf(paths), loaded => ActivateBook(loaded));
+        Find<ContentControl>("OnlineWorkspace").Content = onlineWorkspace.View;
+        Find<Button>("NavShelf").Click += (s, e) => ShowLocalShelf();
+        Find<Button>("NavDownloads").Click += (s, e) => OpenWorkspace("downloads");
+        Find<Button>("NavSources").Click += (s, e) => OpenWorkspace("sources");
+        Find<Button>("NavSettings").Click += (s, e) => OpenWorkspace("settings");
         Bind("Layout", ToggleLayout);
         Bind("Direction", ToggleDirection);
         Bind("Cover", ToggleCover);
@@ -180,6 +195,7 @@ sealed class Reader
         Bind("Full", ToggleFullscreen);
         Bind("Previous", () => Turn(-1));
         Bind("Next", () => Turn(1));
+        Find<Button>("NextVolumeButton").Click += async (s, e) => await OpenNextVolume();
         pageNumber.GotKeyboardFocus += (s, e) => pageNumber.SelectAll();
         pageNumber.PreviewKeyDown += PageNumberKey;
         pageNumber.LostKeyboardFocus += (s, e) => SyncPageNumber();
@@ -243,6 +259,7 @@ sealed class Reader
         window.Loaded += (s, e) => ReloadShelf();
         window.Closed += (s, e) =>
         {
+            SuwayomiService.Stop();
             FlushPosition();
             continuous.Stop();
             pageTurn.Stop();
@@ -314,27 +331,49 @@ sealed class Reader
         else if (paths.Length == 1) await OpenAsync(paths[0]);
     }
 
-    async Task OpenAsync(string path)
+    void OpenOnlineManga()
     {
-        if (string.IsNullOrEmpty(path)) return;
         if (opening != null) opening.Cancel();
-        var operation = new CancellationTokenSource();
-        opening = operation;
-        SetNotice("正在打开文件…", false);
-        try
+        SetNotice(null);
+        var selected = OnlineMangaWindow.Show(window, state);
+        if (selected != null) ActivateBook(selected);
+    }
+
+    void OpenSuwayomi()
+    {
+        OpenWorkspace("search");
+    }
+    void OpenWorkspace(string page)
+    {
+        Find<ScrollViewer>("ShelfScroll").Visibility = Visibility.Collapsed;
+        Find<StackPanel>("ShelfEmpty").Visibility = Visibility.Collapsed;
+        Find<ContentControl>("OnlineWorkspace").Visibility = Visibility.Visible;
+        onlineWorkspace.Navigate(page);
+    }
+    void ShowLocalShelf()
+    {
+        Find<ContentControl>("OnlineWorkspace").Visibility = Visibility.Collapsed;
+        Find<ScrollViewer>("ShelfScroll").Visibility = Visibility.Visible;
+        ReloadShelf();
+    }
+
+    void ActivateBook(ReaderBook loaded)
+    {
+        FlushPosition();
+        if (rendering != null) rendering.Cancel();
+        if (preloading != null) preloading.Cancel();
+        jumpTimer.Stop();
+        if (book is OnlineBook || book is SuwayomiBook) book.ClearCache();
+        book = loaded;
+        lastSpreadPresented = false;
+        bookDirection = loaded.PreferredRightToLeft;
+        position = Math.Max(0, Math.Min(book.Count - 1, state.ReadPosition(book.Path)));
+        preloadDirection = 1;
+        string shelfError = null;
+        var online = loaded as OnlineBook;
+        var suwayomi = loaded as SuwayomiBook;
+        if (online == null && suwayomi == null)
         {
-            openingPath = Path.GetFullPath(path);
-            var loaded = await ReaderBook.OpenAsync(openingPath, operation.Token);
-            operation.Token.ThrowIfCancellationRequested();
-            FlushPosition();
-            if (rendering != null) rendering.Cancel();
-            if (preloading != null) preloading.Cancel();
-            jumpTimer.Stop();
-            book = loaded;
-            bookDirection = loaded.PreferredRightToLeft;
-            position = Math.Max(0, Math.Min(book.Count - 1, state.ReadPosition(book.Path)));
-            preloadDirection = 1;
-            string shelfError = null;
             try { bookshelf.RecordOpened(loaded); }
             catch (Exception error)
             {
@@ -343,16 +382,43 @@ sealed class Reader
             }
             state.LastPath = book.Path;
             state.SaveSettings();
-            zoom = 1;
-            var title = Path.GetFileNameWithoutExtension(book.Path);
-            Find<TextBlock>("BookTitle").Text = title;
-            Find<TextBlock>("BookTitle").ToolTip = book.Path;
-            window.Title = title + " · KomaSnap";
-            SetShelfVisible(false);
-            RebuildSpreads();
-            SetNotice(shelfError);
-            CacheShelfCover(loaded);
-            FocusReader();
+        }
+        FindNextVolume();
+        zoom = 1;
+        var title = suwayomi != null ? suwayomi.Title : online == null ? Path.GetFileNameWithoutExtension(book.Path) : online.Title;
+        Find<TextBlock>("BookTitle").Text = title;
+        Find<TextBlock>("BookTitle").ToolTip = book.Path;
+        window.Title = title + " · KomaSnap";
+        SetShelfVisible(false);
+        RebuildSpreads();
+        SetNotice(shelfError);
+        if (online == null && suwayomi == null) CacheShelfCover(loaded);
+        FocusReader();
+    }
+
+    async Task OpenAsync(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return;
+        if (opening != null) opening.Cancel();
+        var operation = new CancellationTokenSource();
+        opening = operation;
+        SyncNextVolume();
+        bool epub = Path.GetExtension(path).Equals(".epub", StringComparison.OrdinalIgnoreCase);
+        SetNotice(epub ? "正在读取 EPUB 内容…" : "正在打开文件…", false);
+        try
+        {
+            openingPath = Path.GetFullPath(path);
+            int lastPercent = -1;
+            var loaded = await ReaderBook.OpenAsync(openingPath, operation.Token, (done, total) =>
+            {
+                if (opening != operation || operation.IsCancellationRequested) return;
+                int percent = (int)(done * 100L / total);
+                if (percent == lastPercent) return;
+                lastPercent = percent;
+                SetNotice("正在排版 EPUB · " + percent + "%", false);
+            });
+            operation.Token.ThrowIfCancellationRequested();
+            ActivateBook(loaded);
         }
         catch (OperationCanceledException) { }
         catch (Exception error)
@@ -369,6 +435,7 @@ sealed class Reader
             {
                 opening = null;
                 openingPath = null;
+                SyncNextVolume();
             }
             operation.Dispose();
         }
@@ -401,6 +468,7 @@ sealed class Reader
             Find<Button>("BackToBook").Visibility = book == null ? Visibility.Collapsed : Visibility.Visible;
             ReloadShelf();
         }
+        SyncNextVolume();
     }
 
     void ShowShelf()
@@ -440,8 +508,9 @@ sealed class Reader
             var books = bookshelf.Read();
             var items = Find<WrapPanel>("ShelfItems");
             items.Children.Clear();
-            foreach (var item in books) items.Children.Add(ShelfCard(item));
-            Find<StackPanel>("ShelfEmpty").Visibility = books.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            foreach (var item in Bookshelf.InVolumeOrder(books)) items.Children.Add(ShelfCard(item));
+            FindNextVolume(books);
+            Find<StackPanel>("ShelfEmpty").Visibility = books.Count == 0 && Find<ContentControl>("OnlineWorkspace").Visibility != Visibility.Visible ? Visibility.Visible : Visibility.Collapsed;
             Find<TextBlock>("ShelfCount").Text = books.Count + " 本";
         }
         catch (Exception error)
@@ -449,6 +518,54 @@ sealed class Reader
             if (!ReaderState.IsStorageError(error)) throw;
             SetNotice("无法读取书架。\n" + error.Message, false);
         }
+    }
+
+    void FindNextVolume(IEnumerable<Bookshelf.Entry> books = null)
+    {
+        nextVolume = null;
+        if (book != null && !(book is OnlineBook) && !(book is SuwayomiBook))
+        {
+            try { nextVolume = Bookshelf.NextVolume(book.Path, books ?? bookshelf.Read()); }
+            catch (Exception error) { if (!ReaderState.IsStorageError(error)) throw; }
+        }
+        Find<TextBlock>("NextVolumeTitle").Text = nextVolume == null ? null : nextVolume.Title;
+        var button = Find<Button>("NextVolumeButton");
+        button.ToolTip = nextVolume == null ? null : nextVolume.Title;
+        System.Windows.Automation.AutomationProperties.SetName(button,
+            nextVolume == null ? "继续读下一卷" : "继续读下一卷，" + nextVolume.Title);
+        SyncNextVolume();
+    }
+
+    void SyncNextVolume()
+    {
+        bool show = nextVolume != null && book != null && !IsShelfVisible && opening == null
+            && (IsScrolling ? continuous.LastPageVisible
+                : lastSpreadPresented && viewport.ScrollableHeight - viewport.VerticalOffset <= 1);
+        var button = Find<Button>("NextVolumeButton");
+        button.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    async Task OpenNextVolume()
+    {
+        var next = nextVolume;
+        if (next == null || book == null || opening != null) return;
+        if (!File.Exists(next.Path))
+        {
+            FindNextVolume();
+            SetNotice("找不到下一卷文件。");
+            return;
+        }
+        position = book.Count - 1;
+        QueuePositionSave();
+        FlushPosition();
+        SyncControls();
+        await OpenAsync(next.Path);
+    }
+
+    async Task OpenShelfEntry(Bookshelf.Entry entry)
+    {
+        if (book != null && string.Equals(book.Path, entry.Path, StringComparison.OrdinalIgnoreCase)) ReturnToBook();
+        else await OpenAsync(entry.Path);
     }
 
     Button ShelfCard(Bookshelf.Entry entry)
@@ -499,11 +616,7 @@ sealed class Reader
         content.Children.Add(indicator);
         var card = new Button { Style = (Style)window.FindResource("ShelfCardStyle"), Content = content, ToolTip = entry.Path };
         System.Windows.Automation.AutomationProperties.SetName(card, entry.Title + "，" + progressText);
-        card.Click += async (s, e) =>
-        {
-            if (book != null && string.Equals(book.Path, entry.Path, StringComparison.OrdinalIgnoreCase)) ReturnToBook();
-            else await OpenAsync(entry.Path);
-        };
+        card.Click += async (s, e) => await OpenShelfEntry(entry);
         var remove = ReaderAppearance.NewMenuItem(window, "移出书架", null);
         remove.Click += (s, e) => RemoveShelfBook(entry.Path);
         card.ContextMenu = ReaderAppearance.NewMenu(window);
@@ -790,6 +903,8 @@ sealed class Reader
     {
         pageTurn.Stop();
         if (!fromDrag) CancelSlide();
+        lastSpreadPresented = false;
+        SyncNextVolume();
         resetScrollOnShow |= resetScroll;
         if (book == null || stage.ActualWidth < 80 || stage.ActualHeight < 60) return;
         var previousRender = rendering;
@@ -832,7 +947,8 @@ sealed class Reader
                     Stretch = Stretch.Fill, VerticalAlignment = VerticalAlignment.Top };
                 int slot = RightToLeft ? pages.Length - 1 - i : i;
                 ready[slot] = new Border { Child = image,
-                    VerticalAlignment = VerticalAlignment.Top };
+                    VerticalAlignment = VerticalAlignment.Top,
+                    Margin = new Thickness(0, 0, slot == 0 && pages.Length == 2 ? ReaderSpine.Gap : 0, 0) };
                 ReaderAppearance.StylePage(ready[slot]);
             }
 
@@ -855,6 +971,8 @@ sealed class Reader
             }
             else if (requestedMotion == PageMotion.Curl) pageTurn.Start(outgoing, incoming, turnFromLeft.Value);
             else slide.Finish(outgoing, incoming, turnFromLeft.Value, fromDrag);
+            lastSpreadPresented = pages.Contains(currentBook.Count - 1);
+            SyncNextVolume();
             PreloadNeighbors(currentBook, dpi, pages, scale);
         }
         catch (OperationCanceledException) { }
@@ -889,7 +1007,9 @@ sealed class Reader
     {
         double totalWidth = pages.Sum(p => currentBook.SizeOf(p).Width);
         double totalHeight = pages.Max(p => currentBook.SizeOf(p).Height);
-        double widthScale = (stage.ActualWidth - 42 - (FitWidth || zoom > 1 ? SystemParameters.VerticalScrollBarWidth : 0)) / totalWidth;
+        double gap = pages.Length == 2 ? ReaderSpine.Gap : 0;
+        double widthScale = (stage.ActualWidth - 42 - gap -
+            (FitWidth || zoom > 1 ? SystemParameters.VerticalScrollBarWidth : 0)) / totalWidth;
         double heightScale = (stage.ActualHeight - 30) / totalHeight;
         return (FitWidth ? widthScale : Math.Min(widthScale, heightScale)) * zoom;
     }
@@ -965,6 +1085,7 @@ sealed class Reader
             }
             return;
         }
+        if (e.Key == Key.Space && Find<Button>("NextVolumeButton").IsKeyboardFocusWithin) return;
         if (book == null || (pageNumber.IsKeyboardFocusWithin && e.Key != Key.F11)) return;
         switch (e.Key)
         {
@@ -1105,7 +1226,8 @@ sealed class Reader
         int[] pages = spreads[index];
         double scale = ScaleFor(book, pages);
         double dpi = VisualTreeHelper.GetDpi(stage).DpiScaleX;
-        double x = (viewport.ViewportWidth - pages.Sum(page => book.SizeOf(page).Width) * scale) / 2;
+        double gap = pages.Length == 2 ? ReaderSpine.Gap : 0;
+        double x = (viewport.ViewportWidth - pages.Sum(page => book.SizeOf(page).Width) * scale - gap) / 2;
         double y = Math.Max(14, (viewport.ViewportHeight - pages.Max(page => book.SizeOf(page).Height) * scale) / 2);
         var leaves = new PageTurnEffect.Leaf[pages.Length];
         for (int i = 0; i < leaves.Length; i++)
@@ -1116,7 +1238,7 @@ sealed class Reader
             BitmapSource image;
             if (!book.TryGetCached(page, width * dpi, out image)) return null;
             leaves[i] = new PageTurnEffect.Leaf(image, new Rect(x, y, width, size.Height * scale));
-            x += width;
+            x += width + gap;
         }
         return leaves;
     }
@@ -1216,3 +1338,4 @@ sealed class Reader
         e.Handled = true;
     }
 }
+

@@ -1,0 +1,30 @@
+name: 发布 Windows 版
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - windows/release/KomaSnap-Batch.exe
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 校验并打包本地服务
+        shell: pwsh
+        run: ./windows/PackageRelease.ps1 -Destination "$env:RUNNER_TEMP/KomaSnap-Windows-Online.zip"
+      - name: 发布版本
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view windows-v1.14-batch --repo $env:GITHUB_REPOSITORY 2>$null
+          if ($LASTEXITCODE -eq 0) { throw '该发行标签已经存在；请勿覆盖现有发行版。' }
+          gh release create windows-v1.14-batch "$env:RUNNER_TEMP/KomaSnap-Windows-Online.zip" --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "KomaSnap Windows 1.14 在线漫画版" --notes "支持本地阅读、在线漫画源及批量下载有权保存的章节。请完整解压后运行 KomaSnap-Batch.exe。扩展由用户确认安装，站点访问可能受网络和网站验证影响。"
+          if ($LASTEXITCODE -ne 0) { throw 'GitHub 发行版创建失败。' }
+

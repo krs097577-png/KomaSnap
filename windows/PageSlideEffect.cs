@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Media;
+using System.Windows.Media.Effects;
 
 enum PageMotion { Slide, Curl, Scroll }
 
@@ -33,6 +34,11 @@ sealed class PageSlideEffect : FrameworkElement
     }
 
     public bool IsActive { get { return from != null; } }
+
+    public Effect PaperEffect
+    {
+        set { outgoingVisual.Effect = incomingVisual.Effect = value; }
+    }
 
     public void Drag(PageTurnEffect.Leaf[] outgoing, PageTurnEffect.Leaf[] incoming, double delta)
     {
@@ -147,3 +153,4 @@ sealed class PageSlideEffect : FrameworkElement
         return bounds;
     }
 }
+

@@ -1,0 +1,40 @@
+{
+  "id": "mangadex",
+  "name": "MangaDex",
+  "baseUrl": "https://mangadex.org/",
+  "referer": "https://mangadex.org/",
+  "requestHosts": ["api.mangadex.org"],
+  "imageHosts": ["uploads.mangadex.org", "*.mangadex.network"],
+  "search": {
+    "request": "https://api.mangadex.org/manga?title={query}&limit=24&includes%5B%5D=cover_art&includes%5B%5D=author",
+    "rows": "data",
+    "fields": {
+      "id": "{id}",
+      "title": ["{attributes.title.zh}", "{attributes.title.zh-hk}", "{attributes.title.en}", "{attributes.title.ja-ro}", "{attributes.title.ja}", "{attributes.altTitles[0].en}", "{attributes.title.ko-ro}", "{attributes.title.ko}"],
+      "url": "https://mangadex.org/title/{id}",
+      "cover": "https://uploads.mangadex.org/covers/{id}/{relationships[type=cover_art].attributes.fileName}.256.jpg",
+      "author": "{relationships[type=author].attributes.name}",
+      "status": "{attributes.status}"
+    }
+  },
+  "chapters": {
+    "request": "https://api.mangadex.org/manga/{id}/feed?limit=100&offset={offset}&order%5Bvolume%5D=desc&order%5Bchapter%5D=desc",
+    "rows": "data",
+    "pageSize": 100,
+    "maxPages": 100,
+    "fields": {
+      "id": "{id}",
+      "title": ["第 {attributes.chapter} 话 · {attributes.title} · {attributes.translatedLanguage}", "第 {attributes.chapter} 话 · {attributes.translatedLanguage}", "{attributes.title} · {attributes.translatedLanguage}", "番外 · {attributes.translatedLanguage}"],
+      "url": "https://mangadex.org/chapter/{id}",
+      "external": "{attributes.externalUrl}"
+    }
+  },
+  "pages": {
+    "request": "https://api.mangadex.org/at-home/server/{id}?forcePort443=true",
+    "rows": "chapter.dataSaver",
+    "fields": {
+      "url": "{root.baseUrl}/data-saver/{root.chapter.hash}/{value}"
+    }
+  }
+}
+

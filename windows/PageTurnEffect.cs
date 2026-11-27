@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Media;
+using System.Windows.Media.Effects;
 
 sealed class PageTurnEffect : FrameworkElement
 {
@@ -26,21 +27,31 @@ sealed class PageTurnEffect : FrameworkElement
     static readonly Pen FoldEdge = MakeFoldEdge();
     readonly Stopwatch clock = new Stopwatch();
     readonly Brush matte;
+    readonly DrawingVisual paperVisual = new DrawingVisual();
+    readonly VisualCollection layers;
     Leaf front;
     Leaf facing;
     Leaf back;
     Geometry newMargins;
+    Rect outgoingGutter;
+    bool gutterMoves;
     bool fromLeft;
     double progress;
 
     public PageTurnEffect(Brush matte)
     {
         this.matte = matte;
+        layers = new VisualCollection(this) { paperVisual };
         IsHitTestVisible = false;
         RenderOptions.SetBitmapScalingMode(this, BitmapScalingMode.Linear);
     }
 
     public bool IsPlaying { get { return clock.IsRunning; } }
+
+    public Effect PaperEffect { set { paperVisual.Effect = value; } }
+
+    protected override int VisualChildrenCount { get { return layers == null ? 0 : layers.Count; } }
+    protected override Visual GetVisualChild(int index) { return layers[index]; }
 
     public void Start(Leaf[] outgoing, Leaf[] incoming, bool fromLeft)
     {
@@ -49,6 +60,13 @@ sealed class PageTurnEffect : FrameworkElement
         front = outgoing[fromLeft ? 0 : outgoing.Length - 1];
         facing = outgoing.Length > 1 ? outgoing[fromLeft ? outgoing.Length - 1 : 0] : null;
         back = incoming[fromLeft ? incoming.Length - 1 : 0];
+        outgoingGutter = GutterBounds(outgoing);
+        var incomingGutter = GutterBounds(incoming);
+        gutterMoves = incomingGutter.IsEmpty ||
+            Math.Abs(outgoingGutter.Left - incomingGutter.Left) > .5 ||
+            Math.Abs(outgoingGutter.Right - incomingGutter.Right) > .5 ||
+            Math.Abs(outgoingGutter.Top - incomingGutter.Top) > .5 ||
+            Math.Abs(outgoingGutter.Bottom - incomingGutter.Bottom) > .5;
         Rect newBounds = incoming[0].Bounds;
         foreach (Leaf leaf in incoming) newBounds.Union(leaf.Bounds);
         Geometry oldPaper = new RectangleGeometry(front.Bounds);
@@ -69,6 +87,8 @@ sealed class PageTurnEffect : FrameworkElement
         clock.Reset();
         front = facing = back = null;
         newMargins = null;
+        outgoingGutter = Rect.Empty;
+        using (paperVisual.RenderOpen()) { }
         InvalidateVisual();
     }
 
@@ -100,9 +120,26 @@ sealed class PageTurnEffect : FrameworkElement
         drawing.DrawGeometry(matte, null, newMargins);
         drawing.Pop();
 
+        // 中缝属于旧版面。翻页主体露出之前，用画布底色遮住下面的新版面。
+        if (!outgoingGutter.IsEmpty)
+        {
+            drawing.PushOpacity(gutterMoves ? 1 - Smooth(t, .86, 1) : 1);
+            drawing.DrawRectangle(matte, null, outgoingGutter);
+            drawing.Pop();
+        }
+
+        // 只给纸面合成层着色，画布留白和防闪遮罩保留主题的画布色。
+        using (var paper = paperVisual.RenderOpen())
+            DrawPaper(paper, t, width, height, bend, top, bottom, middle, tipTop, tipBottom, lift, shadow);
+    }
+
+    void DrawPaper(DrawingContext drawing, double t, double width, double height, double bend,
+        double top, double bottom, double middle, double tipTop, double tipBottom, double lift, double shadow)
+    {
         if (facing != null)
         {
-            double far = width + facing.Bounds.Width + 2;
+            double far = (fromLeft ? facing.Bounds.Right - front.Bounds.Left
+                : front.Bounds.Right - facing.Bounds.Left) + 1;
             double settle = Smooth(t, .78, 1);
             double wipeTop = tipTop + (far - tipTop) * settle;
             double wipeBottom = tipBottom + (far - tipBottom) * settle;
@@ -173,6 +210,17 @@ sealed class PageTurnEffect : FrameworkElement
         return new Point(fromLeft ? rect.Left + x : rect.Right - x, rect.Top + y);
     }
 
+    static Rect GutterBounds(Leaf[] pages)
+    {
+        if (pages.Length != 2) return Rect.Empty;
+        Rect left = pages[0].Bounds;
+        Rect right = pages[1].Bounds;
+        double width = right.Left - left.Right;
+        if (width <= 0) return Rect.Empty;
+        double top = Math.Min(left.Top, right.Top);
+        return new Rect(left.Right, top, width, Math.Max(left.Bottom, right.Bottom) - top);
+    }
+
     static LinearGradientBrush[] Gradients(params GradientStop[] stops)
     {
         var gradients = new LinearGradientBrush[2];
@@ -221,3 +269,4 @@ sealed class PageTurnEffect : FrameworkElement
         return x * x * (3 - 2 * x);
     }
 }
+

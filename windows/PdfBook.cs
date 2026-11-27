@@ -67,3 +67,4 @@ sealed class PdfBook : ReaderBook
         }, token);
     }
 }
+

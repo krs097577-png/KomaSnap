@@ -86,3 +86,4 @@ sealed class ReaderTray : IDisposable
         if (icon != null) icon.Dispose();
     }
 }
+

@@ -40,6 +40,18 @@ sealed class ContinuousReader
 
     public ScrollViewer Viewport { get; private set; }
     public event Action<int> PositionChanged;
+    public event Action EndVisibilityChanged;
+
+    public bool LastPageVisible
+    {
+        get
+        {
+            PageSlot last;
+            return book != null && Viewport.ViewportHeight > 0 && slots.TryGetValue(pages.Length - 1, out last)
+                && last.Image.Source != null
+                && Viewport.VerticalOffset + Viewport.ViewportHeight >= pages[pages.Length - 1].Bottom - 1;
+        }
+    }
 
     public void ArrangeBook(ReaderBook current, Size available, double scaleDpi, bool fitWidth, double zoom,
         int position, bool startAtTop)
@@ -85,6 +97,7 @@ sealed class ContinuousReader
         }
         finally { arranging = false; }
         UpdatePages();
+        if (EndVisibilityChanged != null) EndVisibilityChanged();
     }
 
     public void Stop()
@@ -152,6 +165,7 @@ sealed class ContinuousReader
         UpdatePages();
         if (e.VerticalChange != 0 && PositionChanged != null)
             PositionChanged(PageAt(Viewport.VerticalOffset + Gap + .5));
+        if (EndVisibilityChanged != null) EndVisibilityChanged();
     }
 
     int PageAt(double offset)
@@ -225,6 +239,7 @@ sealed class ContinuousReader
             token.ThrowIfCancellationRequested();
             slot.Image.Source = image;
             ReaderAppearance.StylePage(slot.Frame);
+            if (page == owner.Count - 1 && EndVisibilityChanged != null) EndVisibilityChanged();
         }
         catch (OperationCanceledException) { }
         catch (Exception error)
@@ -242,3 +257,4 @@ sealed class ContinuousReader
         }
     }
 }
+

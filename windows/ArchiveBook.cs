@@ -53,6 +53,7 @@ sealed class ArchiveBook : ReaderBook
     }
 
     readonly Page[] pages;
+    static readonly Lazy<Task<Dispatcher>> TextWorker = new Lazy<Task<Dispatcher>>(StartTextWorker);
 
     ArchiveBook(string path, Page[] pages, bool? rightToLeft)
         : base(path, pages.Select(page => page.Size).ToArray(), rightToLeft)
@@ -60,7 +61,8 @@ sealed class ArchiveBook : ReaderBook
         this.pages = pages;
     }
 
-    public static async Task<ArchiveBook> LoadAsync(string path, bool epub, CancellationToken token)
+    public static async Task<ArchiveBook> LoadAsync(string path, bool epub, CancellationToken token,
+        Action<int, int> onPagination = null)
     {
         var content = await Task.Run(() =>
         {
@@ -74,6 +76,8 @@ sealed class ArchiveBook : ReaderBook
         }, token);
 
         var pages = new List<Page>();
+        int textParts = content.Item1.Count(part => part.Text != null);
+        int formatted = 0;
         foreach (Part part in content.Item1)
         {
             token.ThrowIfCancellationRequested();
@@ -81,9 +85,12 @@ sealed class ArchiveBook : ReaderBook
                 pages.Add(new Page { ImagePath = part.ImagePath, Size = part.Size });
             else
             {
-                await Dispatcher.Yield(DispatcherPriority.Background);
-                token.ThrowIfCancellationRequested();
-                AddTextPages(part.Text, pages);
+                var worker = await TextWorker.Value;
+                if (formatted == 0 && onPagination != null) onPagination(0, textParts);
+                var chapter = await worker.InvokeAsync(() => Paginate(part.Text, token), DispatcherPriority.Background, token).Task;
+                pages.AddRange(chapter);
+                formatted++;
+                if (onPagination != null) onPagination(formatted, textParts);
             }
         }
         if (pages.Count == 0) throw new InvalidDataException(epub ? "这本 EPUB 没有可读取的文字或图片页面。" : "压缩包中没有支持的图片。");
@@ -354,7 +361,23 @@ sealed class ArchiveBook : ReaderBook
         }
     }
 
-    static void AddTextPages(List<ParagraphData> text, List<Page> pages)
+    static Task<Dispatcher> StartTextWorker()
+    {
+        // 排版对象和页面渲染必须使用同一个 STA 线程。
+        var ready = new TaskCompletionSource<Dispatcher>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            ready.SetResult(Dispatcher.CurrentDispatcher);
+            Dispatcher.Run();
+        });
+        thread.Name = "KomaSnap EPUB 排版";
+        thread.IsBackground = true;
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        return ready.Task;
+    }
+
+    static Page[] Paginate(List<ParagraphData> text, CancellationToken token)
     {
         var doc = new FlowDocument
         {
@@ -364,6 +387,7 @@ sealed class ArchiveBook : ReaderBook
         };
         foreach (var item in text)
         {
+            token.ThrowIfCancellationRequested();
             var paragraph = new Paragraph(new Run(item.Text)) { Margin = new Thickness(0, 0, 0, 14) };
             if (item.Heading)
             {
@@ -378,8 +402,11 @@ sealed class ArchiveBook : ReaderBook
         paginator.IsBackgroundPaginationEnabled = false;
         paginator.PageSize = TextPageSize;
         paginator.ComputePageCount();
-        for (int page = 0; page < paginator.PageCount; page++)
-            pages.Add(new Page { Size = TextPageSize, Paginator = paginator, PageNumber = page });
+        token.ThrowIfCancellationRequested();
+        var pages = new Page[paginator.PageCount];
+        for (int page = 0; page < pages.Length; page++)
+            pages[page] = new Page { Size = TextPageSize, Paginator = paginator, PageNumber = page };
+        return pages;
     }
 
     protected override async Task<BitmapSource> RenderPageAsync(int index, int width, CancellationToken token)
@@ -403,7 +430,12 @@ sealed class ArchiveBook : ReaderBook
                 }
             }, token);
 
-        await Dispatcher.Yield(DispatcherPriority.Background);
+        var worker = await TextWorker.Value;
+        return await worker.InvokeAsync(() => RenderText(page, width, token), DispatcherPriority.Background, token).Task;
+    }
+
+    static BitmapSource RenderText(Page page, int width, CancellationToken token)
+    {
         token.ThrowIfCancellationRequested();
         DocumentPage source = page.Paginator.GetPage(page.PageNumber);
         int height = (int)Math.Ceiling(width * page.Size.Height / page.Size.Width);
@@ -424,3 +456,4 @@ sealed class ArchiveBook : ReaderBook
         return bitmap;
     }
 }
+

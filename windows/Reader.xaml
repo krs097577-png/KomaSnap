@@ -193,14 +193,12 @@
                       CanContentScroll="False" PanningMode="Both">
           <Canvas x:Name="ContinuousPages" Background="Transparent"/>
         </ScrollViewer>
-        <Border x:Name="ReaderTint" IsHitTestVisible="False" Focusable="False"
-                Background="{DynamicResource ReaderTintBrush}"/>
         <Border x:Name="Notice" Style="{StaticResource PopupPanel}" Visibility="Collapsed"
                 Margin="12,112,12,16" HorizontalAlignment="Center" VerticalAlignment="Top" IsHitTestVisible="False">
           <TextBlock x:Name="NoticeText" Foreground="{DynamicResource TextPrimary}" TextWrapping="Wrap" MaxWidth="520"/>
         </Border>
       </Grid>
-      <Border x:Name="Header" Visibility="Collapsed" VerticalAlignment="Top" Background="{DynamicResource Overlay}"
+      <Border x:Name="Header" Visibility="Collapsed" VerticalAlignment="Top" Background="{DynamicResource Surface}"
               BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1">
         <StackPanel Margin="16,7,16,4">
           <DockPanel LastChildFill="True" Margin="0,0,0,4">
@@ -229,7 +227,7 @@
           </WrapPanel>
         </StackPanel>
       </Border>
-      <Border x:Name="Footer" Visibility="Collapsed" VerticalAlignment="Bottom" Background="{DynamicResource Overlay}"
+      <Border x:Name="Footer" Visibility="Collapsed" VerticalAlignment="Bottom" Background="{DynamicResource Surface}"
               BorderBrush="{DynamicResource Border}" BorderThickness="0,1,0,0">
         <Grid Margin="16,7">
           <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -241,7 +239,7 @@
                   Minimum="1" Maximum="2" SmallChange="1" LargeChange="10" IsSnapToTickEnabled="True"
                   TickFrequency="1" IsMoveToPointEnabled="True"/>
           <Button Grid.Column="2" x:Name="PageJump" Style="{StaticResource ToolButton}" Content="— / —" Margin="0"
-                  Foreground="{DynamicResource TextSecondary}" ToolTip="点击输入页码"/>
+                  ToolTip="点击输入页码"/>
           <Popup x:Name="JumpPopup" PlacementTarget="{Binding ElementName=PageJump}" Placement="Top" StaysOpen="False"
                  AllowsTransparency="True" VerticalOffset="-6">
             <Border Style="{StaticResource PopupPanel}">
@@ -254,15 +252,27 @@
           </Popup>
         </Grid>
       </Border>
+      <Button x:Name="NextVolumeButton" Visibility="Collapsed" Panel.ZIndex="4"
+              HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="16,0,20,67"
+              Padding="12,7" MaxWidth="270" HorizontalContentAlignment="Left"
+              Background="{DynamicResource Elevated}" BorderBrush="{DynamicResource Border}">
+        <StackPanel>
+          <TextBlock Text="继续读下一卷 →" Foreground="{DynamicResource Accent}" FontWeight="SemiBold"/>
+          <TextBlock x:Name="NextVolumeTitle" TextTrimming="CharacterEllipsis"
+                     Foreground="{DynamicResource TextSecondary}" Margin="0,3,0,0"/>
+        </StackPanel>
+      </Button>
     </Grid>
     <Grid x:Name="ShelfView" Background="{DynamicResource App}">
       <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
       <Border Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1">
+       <StackPanel>
         <DockPanel Margin="27,14" LastChildFill="True">
           <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" VerticalAlignment="Center">
             <Button x:Name="BackToBook" Content="返回阅读" Visibility="Collapsed" ToolTip="返回阅读（B）"/>
             <Button x:Name="Open" Content="打开文件" ToolTip="打开文件（Ctrl+O）"/>
             <Button x:Name="AddBooks" Content="+ 添加书籍" ToolTip="批量添加书籍"/>
+            <Button x:Name="OnlineManga" Content="旧版在线源" Visibility="Collapsed"/>
             <Button x:Name="ThemeButton" Content="主题" Margin="0" ToolTip="切换界面主题"/>
           </StackPanel>
           <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
@@ -270,9 +280,17 @@
             <TextBlock x:Name="ShelfCount" Foreground="{DynamicResource TextSecondary}" Margin="12,3,0,0" VerticalAlignment="Center"/>
           </StackPanel>
         </DockPanel>
+        <WrapPanel Margin="27,0,20,10">
+          <Button x:Name="NavShelf" Content="本地书架"/>
+          <Button x:Name="Suwayomi" Content="在线漫画"/>
+          <Button x:Name="NavDownloads" Content="下载管理"/>
+          <Button x:Name="NavSources" Content="漫画源"/>
+          <Button x:Name="NavSettings" Content="设置"/>
+        </WrapPanel>
+       </StackPanel>
       </Border>
-      <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" PanningMode="VerticalOnly">
-        <WrapPanel x:Name="ShelfItems" Margin="27,24,16,12" ItemWidth="180"/>
+      <ScrollViewer x:Name="ShelfScroll" Grid.Row="1" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" PanningMode="VerticalOnly">
+        <WrapPanel x:Name="ShelfItems" Margin="27,20,16,12" ItemWidth="180"/>
       </ScrollViewer>
       <StackPanel x:Name="ShelfEmpty" Grid.Row="1" VerticalAlignment="Center" HorizontalAlignment="Center">
         <Border Width="70" Height="62" HorizontalAlignment="Center" Background="{DynamicResource Elevated}" BorderBrush="{DynamicResource Border}"
@@ -286,6 +304,7 @@
         <Button x:Name="EmptyAddBooks" Content="+ 添加书籍" HorizontalAlignment="Center" Margin="0"
                 Foreground="{DynamicResource Accent}" BorderBrush="{DynamicResource Accent}"/>
       </StackPanel>
+      <ContentControl x:Name="OnlineWorkspace" Grid.Row="1" Visibility="Collapsed" Background="{DynamicResource App}"/>
       <Border x:Name="ShelfNotice" Grid.Row="2" Visibility="Collapsed" Background="{DynamicResource Surface}"
               BorderBrush="{DynamicResource Border}" BorderThickness="0,1,0,0" Padding="28,9">
         <TextBlock x:Name="ShelfNoticeText" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap"/>
@@ -293,3 +312,4 @@
     </Grid>
   </Grid>
 </Window>
+

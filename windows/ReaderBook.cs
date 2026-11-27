@@ -44,12 +44,13 @@ abstract class ReaderBook
         }
     }
 
-    public static async Task<ReaderBook> OpenAsync(string path, CancellationToken token)
+    public static async Task<ReaderBook> OpenAsync(string path, CancellationToken token,
+        Action<int, int> onPagination = null)
     {
         switch (System.IO.Path.GetExtension(path).ToLowerInvariant())
         {
             case ".pdf": return await PdfBook.LoadAsync(path, token);
-            case ".epub": return await ArchiveBook.LoadAsync(path, true, token);
+            case ".epub": return await ArchiveBook.LoadAsync(path, true, token, onPagination);
             case ".cbz": case ".zip": return await ArchiveBook.LoadAsync(path, false, token);
             default: throw new InvalidDataException("支持打开 PDF、EPUB、CBZ 和图片 ZIP。");
         }
@@ -204,3 +205,4 @@ abstract class ReaderBook
         return (long)bitmap.PixelWidth * bitmap.PixelHeight * 4;
     }
 }
+

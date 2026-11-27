@@ -3,9 +3,11 @@
 /android/sdk-local/
 /android/verify/classes/
 /windows/*.exe
+/windows/parser-packages/
 *.apk
 *.jks
 *.keystore
 *.p12
 *.pfx
 .env
+

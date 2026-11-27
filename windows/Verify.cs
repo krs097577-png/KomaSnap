@@ -20,6 +20,11 @@ static class Verify
     [STAThread]
     static int Main(string[] args)
     {
+        if (args.Length > 0 && args[0] == "network-message") {
+            string result = SuwayomiService.FriendlyError("Exception: Cloudflare bypass currently disabled\r\nstack trace");
+            if (!result.Contains("访问验证") || !result.Contains("Cloudflare bypass currently disabled") || result.Contains("stack trace")) return 1;
+            Console.WriteLine("PASS: Cloudflare error gives concise guidance without stack trace"); return 0;
+        }
         var app = new Application();
         bool formatsOnly = args[0] == "formats-only";
         bool shelfOnly = args[0] == "shelf-only";
@@ -212,7 +217,7 @@ static class Verify
     static void SelectMode(Reader reader, PageMotion motion)
     {
         var menu = Field<ContextMenu>(reader, "motionMenu");
-        var option = menu.Items.Cast<MenuItem>().Single(item => (PageMotion)item.Tag == motion);
+        var option = menu.Items.Cast<MenuItem>().Single(item => item.Tag is PageMotion && (PageMotion)item.Tag == motion);
         option.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
         Check(menu.Items.Cast<MenuItem>().Where(item => item.IsChecked).SequenceEqual(new[] { option }), "翻页菜单只有一个选中项");
     }
@@ -274,8 +279,8 @@ static class Verify
         var stage = Field<Grid>(reader, "stage");
         var menu = Field<ContextMenu>(reader, "motionMenu");
         Click(window, "PageMotion");
-        Check(menu.IsOpen && menu.Items.Count == 3 &&
-            menu.Items.Cast<MenuItem>().Select(item => item.Header.ToString())
+        Check(menu.IsOpen && menu.Items.Count == 4 &&
+            menu.Items.Cast<MenuItem>().Take(3).Select(item => item.Header.ToString())
                 .SequenceEqual(new[] { "左右滑动", "仿真卷页", "上下滚动" }), "同一个菜单显示三个选项");
         menu.IsOpen = false;
         SelectMode(reader, PageMotion.Curl);
@@ -577,3 +582,4 @@ static class Verify
         if (!ok) throw new Exception(label);
     }
 }
+

@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
+using System.Text.RegularExpressions;
 using System.Windows.Media.Imaging;
 using System.Xml.Linq;
 
@@ -19,6 +21,16 @@ sealed class Bookshelf
     static readonly StringComparer FileComparer = StringComparer.OrdinalIgnoreCase;
     readonly ReaderState state;
     readonly string catalog;
+    static readonly Regex VolumeName = new Regex(
+        @"^(?<series>.+?)(?:(?:第\s*)?(?<number>[0-9]{1,4})\s*[卷册]|(?:\bvol(?:ume)?\.?\s*|[\s_\-]v\s*|卷\s*)(?<number>[0-9]{1,4})|[\s_\-]+(?<number>[0-9]{1,3}))$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    sealed class Volume
+    {
+        public Entry Book;
+        public string Series;
+        public int Number;
+    }
 
     public Bookshelf(ReaderState state)
     {
@@ -66,6 +78,53 @@ sealed class Bookshelf
         }
         if (added > 0) Save(items);
         return added;
+    }
+
+    static Volume ParseVolume(Entry book)
+    {
+        var match = VolumeName.Match(book.Title.Normalize(NormalizationForm.FormKC).Trim());
+        int number;
+        if (!match.Success || !int.TryParse(match.Groups["number"].Value, out number)) return null;
+        string series = Regex.Replace(match.Groups["series"].Value.Trim(' ', '_', '-'), @"[\s_\-]+", " ");
+        if (series.Length == 0 || !series.Any(c => !char.IsWhiteSpace(c) && !char.IsDigit(c))) return null;
+        return new Volume { Book = book, Series = series, Number = number };
+    }
+
+    public static IEnumerable<Entry> InVolumeOrder(IList<Entry> books)
+    {
+        var volumes = books.Select(ParseVolume).ToArray();
+        var series = volumes.Where(volume => volume != null).ToLookup(volume => volume.Series, FileComparer);
+        var shown = new HashSet<string>(FileComparer);
+        for (int i = 0; i < books.Count; i++)
+        {
+            var volume = volumes[i];
+            if (volume == null) yield return books[i];
+            else if (shown.Add(volume.Series))
+                foreach (var item in series[volume.Series].OrderBy(item => item.Number)) yield return item.Book;
+        }
+    }
+
+    public static Entry NextVolume(string path, IEnumerable<Entry> books)
+    {
+        var current = ParseVolume(new Entry { Path = path });
+        if (current == null) return null;
+        var candidates = books.Select(ParseVolume)
+            .Where(item => item != null && FileComparer.Equals(item.Series, current.Series)
+                && item.Number == current.Number + 1 && File.Exists(item.Book.Path))
+            .Select(item => item.Book).ToList();
+        if (candidates.Count > 1)
+        {
+            var sameFolder = candidates.Where(item => FileComparer.Equals(
+                System.IO.Path.GetDirectoryName(path), System.IO.Path.GetDirectoryName(item.Path))).ToList();
+            if (sameFolder.Count > 0) candidates = sameFolder;
+        }
+        if (candidates.Count > 1)
+        {
+            var sameFormat = candidates.Where(item => FileComparer.Equals(
+                System.IO.Path.GetExtension(path), System.IO.Path.GetExtension(item.Path))).ToList();
+            if (sameFormat.Count > 0) candidates = sameFormat;
+        }
+        return candidates.Count == 1 ? candidates[0] : null;
     }
 
     public void RecordOpened(ReaderBook book)
@@ -141,3 +200,4 @@ sealed class Bookshelf
         ReaderState.WriteAtomic(catalog, document.Save);
     }
 }
+
